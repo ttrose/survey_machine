@@ -1,0 +1,22 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "survey-machine",
+  "main": "worker.py",
+  "compatibility_date": "2026-10-09",
+  "compatibility_flags": ["python_workers"],
+  "assets": {
+    "directory": "./survey_machine/web",
+    "binding": "ASSETS",
+    "run_worker_first": true
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "survey-machine",
+      "database_id": "REPLACE_WITH_YOUR_D1_DATABASE_ID",
+      "migrations_dir": "survey_machine/migrations"
+    }
+  ],
+  "vars": {"CORS_ORIGINS": ""},
+  "observability": {"enabled": false}
+}
