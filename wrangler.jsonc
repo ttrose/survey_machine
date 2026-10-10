@@ -1,9 +1,13 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "survey-machine",
-  "main": "worker.py",
+  "main": ".worker/worker.py",
   "compatibility_date": "2026-10-09",
   "compatibility_flags": ["python_workers"],
+  "build": {
+    "command": "uv run --no-sync python scripts/stage_worker.py",
+    "watch_dir": ["survey_machine", "worker.py"]
+  },
   "assets": {
     "directory": "./survey_machine/web",
     "binding": "ASSETS",
@@ -17,6 +21,6 @@
       "migrations_dir": "survey_machine/migrations"
     }
   ],
-  "vars": {"CORS_ORIGINS": ""},
+  "vars": {"CORS_ORIGINS": "", "SECURE_COOKIES": "true", "SERVE_UI": "true"},
   "observability": {"enabled": false}
 }

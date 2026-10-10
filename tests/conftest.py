@@ -1,4 +1,5 @@
 import os
+from urllib.parse import urlsplit
 
 from fastapi.testclient import TestClient
 import pytest
@@ -12,21 +13,20 @@ ADMIN_KEY = "test-administrator-key-for-survey-machine-12345"
 @pytest.fixture
 def client():
     # TEST_DATABASE_URL must point to a disposable database. CI supplies its own.
-    settings = Settings(admin_api_key=ADMIN_KEY, database_url=os.environ.get("TEST_DATABASE_URL", "sqlite:///:memory:"),
+    url = os.environ.get("TEST_DATABASE_URL", "sqlite:///:memory:")
+    if url != "sqlite:///:memory:" and not urlsplit(url).path.endswith("_test"):
+        pytest.fail("TEST_DATABASE_URL must name a disposable database ending in _test.")
+    settings = Settings(admin_api_key=ADMIN_KEY, database_url=url,
                         cors_origins=("https://consumer.example",))
     with TestClient(create_app(settings)) as connection:
         connection.headers["X-API-Key"] = ADMIN_KEY
         yield connection
         if os.environ.get("TEST_DATABASE_URL"):
-            headers = {"X-API-Key": ADMIN_KEY}
-            while True:
-                surveys = connection.get("/api/v1/surveys?limit=100", headers=headers).json()["items"]
-                if not surveys:
-                    break
-                for survey in surveys:
-                    connection.delete(f"/api/v1/surveys/{survey['id']}", headers=headers)
-            for key in connection.get("/api/v1/api-keys", headers=headers).json():
-                connection.delete(f"/api/v1/api-keys/{key['id']}", headers=headers)
+            # The explicit _test guard above is required because this database is cleared.
+            database = connection.app.state.database
+            for table in ("responses", "surveys", "api_keys", "sessions", "auth_attempts"):
+                connection.portal.call(database.execute, f"DELETE FROM {table}")
+            connection.portal.call(database.execute, "DELETE FROM workspaces WHERE id <> 'default'")
 
 
 @pytest.fixture

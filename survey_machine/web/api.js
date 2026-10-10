@@ -1,6 +1,8 @@
 let workspaceKey = '';
+let csrfToken = '';
 
 export function setKey(key) { workspaceKey = key; }
+export function setSession(session) { csrfToken = session?.csrf_token || ''; }
 
 export class ApiError extends Error {
   constructor(status, detail) {
@@ -17,10 +19,11 @@ export class ApiError extends Error {
 export async function api(path, { method = 'GET', body, publicRequest = false } = {}) {
   const headers = {};
   if (!publicRequest && workspaceKey) headers['X-API-Key'] = workspaceKey;
+  if (!publicRequest && csrfToken && !['GET', 'HEAD'].includes(method)) headers['X-CSRF-Token'] = csrfToken;
   if (body !== undefined) headers['Content-Type'] = 'application/json';
   let response;
   try {
-    response = await fetch(`/api/v1${path}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
+    response = await fetch(`/api/v1${path}`, { method, headers, credentials: publicRequest ? 'omit' : 'same-origin', body: body === undefined ? undefined : JSON.stringify(body) });
   } catch {
     throw new ApiError(0, 'Could not reach Survey Machine. Check your connection and try again.');
   }
@@ -32,7 +35,7 @@ export async function api(path, { method = 'GET', body, publicRequest = false } 
 }
 
 export async function download(surveyId, format) {
-  const response = await fetch(`/api/v1/surveys/${surveyId}/export?format=${format}`, { headers: { 'X-API-Key': workspaceKey } });
+  const response = await fetch(`/api/v1/surveys/${surveyId}/export?format=${format}`, { headers: workspaceKey ? { 'X-API-Key': workspaceKey } : {} });
   if (!response.ok) {
     const error = await response.json().catch(() => ({}));
     throw new ApiError(response.status, error.detail);

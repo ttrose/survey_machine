@@ -1,0 +1,32 @@
+name: survey-machine
+services:
+  app:
+    build: .
+    ports:
+      - "127.0.0.1:8080:8000"
+    environment:
+      ADMIN_API_KEY: ${ADMIN_API_KEY:?Run npm run setup first}
+      DATABASE_URL: postgresql://survey:${POSTGRES_PASSWORD:?Run npm run setup first}@postgres:5432/survey
+      CORS_ORIGINS: ${CORS_ORIGINS:-}
+      SECURE_COOKIES: ${SECURE_COOKIES:-false}
+      SERVE_UI: ${SERVE_UI:-true}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: survey
+      POSTGRES_USER: survey
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Run npm run setup first}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U survey -d survey"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+volumes:
+  postgres-data:

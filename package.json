@@ -1,0 +1,21 @@
+{
+  "name": "survey-machine-tools",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "dev": "uv run --extra local uvicorn survey_machine.main:app --host 127.0.0.1 --port 8000 --reload",
+    "setup": "uv run --extra local python scripts/setup_dev.py",
+    "dev:cloudflare": "uv run --group workers pywrangler dev --local --ip 127.0.0.1 --port 8787",
+    "db:migrate:local": "wrangler d1 migrations apply DB --local",
+    "check": "node --check survey_machine/web/app.js && node --check survey_machine/web/api.js && node --check survey_machine/web/forms.js && node --check survey_machine/web/accounts.js",
+    "test": "uv run --extra local --extra dev pytest -q",
+    "test:browser": "playwright test",
+    "build:cloudflare": "uv run --group workers pywrangler deploy --dry-run --outdir dist/cloudflare"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.64.0",
+    "wrangler": "4.149.0"
+  }
+}

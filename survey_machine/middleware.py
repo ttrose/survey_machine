@@ -20,6 +20,10 @@ class SecurityMiddleware:
             cors_headers = [(b"access-control-allow-origin", origin.encode()), (b"vary", b"Origin"),
                             (b"access-control-expose-headers", b"Content-Disposition")]
         path = scope["path"]
+        # Mounted ASGI apps retain the full request path in the scope.
+        root_path = scope.get("root_path", "").rstrip("/")
+        if root_path and (path == root_path or path.startswith(root_path + "/")):
+            path = path[len(root_path):] or "/"
         docs = path in ("/docs", "/docs/oauth2-redirect", "/redoc")
         script = "'self' https://cdn.jsdelivr.net 'unsafe-inline'" if docs else "'self'"
         style = "'self' https://cdn.jsdelivr.net 'unsafe-inline'" if docs else "'self'"
@@ -42,6 +46,13 @@ class SecurityMiddleware:
             await safe_send({"type": "http.response.start", "status": status,
                              "headers": [(b"content-type", b"application/json")]})
             await safe_send({"type": "http.response.body", "body": json.dumps({"detail": detail}).encode()})
+
+        # Browser login and activation must originate from this application.
+        # Integration CORS applies to API keys, never to cookie authentication.
+        if path.startswith("/api/v1/auth/") and scope["method"] not in {"GET", "HEAD", "OPTIONS"}:
+            host = headers.get(b"host", b"").decode()
+            if (origin and origin != f"{scope.get('scheme', 'http')}://{host}") or headers.get(b"sec-fetch-site") == b"cross-site":
+                return await reject(403, "Sign in from the Survey Machine application.")
 
         if scope["method"] == "OPTIONS" and b"access-control-request-method" in headers:
             if origin not in allowed:

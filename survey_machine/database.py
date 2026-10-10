@@ -20,7 +20,8 @@ class D1Database:
 
     async def fetch_all(self, sql: str, params: tuple = ()):
         result = await self.statement(sql, params).all()
-        return result.results.to_py()
+        # The Workers SDK converts D1 rows to Python dictionaries.
+        return result.results
 
     async def fetch_one(self, sql: str, params: tuple = ()):
         rows = await self.fetch_all(sql, params)

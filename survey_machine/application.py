@@ -2,18 +2,17 @@ from contextlib import asynccontextmanager
 import csv
 from decimal import Decimal
 from io import StringIO
-import secrets
 from typing import Annotated, Literal
 from uuid import UUID
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response, StreamingResponse
-from fastapi.security import APIKeyHeader
 
 from . import __version__
 from .config import Settings
-from .database import D1Database, open_database
+from .database import open_database
+from .auth import DB, Principal, get_database, require_owner, require_scope, router as auth_router
 from .middleware import SecurityMiddleware
 from .models import (
     ALL_SCOPES, AnswerError, KeyCreate, KeyCreated, KeyOut, PublicSurvey, QuestionSummary,
@@ -23,56 +22,16 @@ from .models import (
 from .repository import Repository, encode, now
 
 
-api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
+async def get_repository(database: DB, principal: Principal):
+    return Repository(database, principal["workspace_id"])
 
 
-async def get_settings(request: Request):
-    if "env" in request.scope:
-        try:
-            return Settings(admin_api_key=str(request.scope["env"].ADMIN_API_KEY))
-        except (AttributeError, ValueError):
-            raise HTTPException(503, "The workspace administrator has not configured the service.")
-    return request.app.state.settings
-
-
-async def get_repository(request: Request):
-    if "env" in request.scope:
-        if not hasattr(request.state, "repository"):
-            request.state.repository = Repository(D1Database(request.scope["env"].DB))
-        return request.state.repository
-    return Repository(request.app.state.database)
+async def get_public_repository(database: DB):
+    return Repository(database)
 
 
 Repo = Annotated[Repository, Depends(get_repository)]
-
-
-async def authenticate(
-    key: Annotated[str | None, Depends(api_key_header)],
-    repository: Repo,
-    settings: Annotated[Settings, Depends(get_settings)],
-):
-    if not key or len(key) > 256:
-        raise HTTPException(401, "Provide a valid X-API-Key header.")
-    if secrets.compare_digest(key.encode(), settings.admin_api_key.encode()):
-        return {"owner": True, "scopes": ALL_SCOPES}
-    principal = await repository.find_key(key)
-    if principal is None:
-        raise HTTPException(401, "Provide a valid X-API-Key header.")
-    return {**principal, "owner": False}
-
-
-def require_scope(scope):
-    async def check(principal: Annotated[dict, Depends(authenticate)]):
-        if scope not in principal["scopes"]:
-            raise HTTPException(403, f"This API key requires the {scope} permission.")
-        return principal
-    return check
-
-
-async def require_owner(principal: Annotated[dict, Depends(authenticate)]):
-    if not principal["owner"]:
-        raise HTTPException(403, "This operation requires the workspace administrator key.")
-    return principal
+PublicRepo = Annotated[Repository, Depends(get_public_repository)]
 
 
 async def must_get_survey(repository, survey_id):
@@ -99,13 +58,16 @@ def csv_cell(value):
     return value
 
 
-def create_app(settings: Settings | None = None, *, worker: bool = False):
+def create_app(settings: Settings | None = None, *, worker: bool = False) -> FastAPI:
+    """Create the standalone service; set Settings.serve_ui=False for API-only use."""
+    configured = settings if worker else (settings or Settings.from_environment())
+
     @asynccontextmanager
     async def lifespan(app):
         if worker:
             yield
             return
-        app.state.settings = settings or Settings.from_environment()
+        app.state.settings = configured
         app.state.database = await open_database(app.state.settings.database_url)
         try:
             yield
@@ -117,8 +79,8 @@ def create_app(settings: Settings | None = None, *, worker: bool = False):
         description="Create and publish surveys, collect anonymous or named responses, and review/export results. Administrative endpoints require a scoped X-API-Key. Public survey endpoints require only a share token.",
         redoc_url=None,
     )
-    configured = settings if worker else (settings or Settings.from_environment())
     app.add_middleware(SecurityMiddleware, cors_origins=configured.cors_origins if configured else ())
+    app.include_router(auth_router)
 
     @app.exception_handler(RequestValidationError)
     async def validation_error(request, exc):
@@ -127,19 +89,16 @@ def create_app(settings: Settings | None = None, *, worker: bool = False):
         return JSONResponse(status_code=422, content={"detail": errors})
 
     @app.get("/health", tags=["Service"])
-    async def health(repository: Repo):
-        await repository.database.fetch_one("SELECT 1 AS ready")
+    async def health(database: DB):
+        try:
+            await database.fetch_all("SELECT s.id, r.id, k.id, w.id, a.digest, t.bucket FROM surveys s, responses r, api_keys k, workspaces w, sessions a, auth_attempts t WHERE 1 = 0")
+        except Exception:
+            return JSONResponse(status_code=503, content={"status": "unavailable", "detail": "Database or migrations are not ready."})
         return {"status": "ok", "version": __version__}
-
-    @app.get("/api/v1/auth/check", tags=["Workspace"], dependencies=[Depends(require_owner)])
-    async def auth_check():
-        return {"workspace": "Survey Machine", "version": __version__}
 
     @app.get("/api/v1/stats", tags=["Workspace"], dependencies=[Depends(require_owner)])
     async def stats(repository: Repo):
-        return await repository.database.fetch_one(
-            "SELECT (SELECT COUNT(*) FROM surveys) AS surveys, (SELECT COUNT(*) FROM surveys WHERE status = 'published') AS published, (SELECT COUNT(*) FROM responses) AS responses"
-        )
+        return await repository.stats()
 
     @app.get("/api/v1/surveys", response_model=SurveyPage, tags=["Surveys"], dependencies=[Depends(require_scope("surveys:read"))])
     async def list_surveys(repository: Repo, limit: Annotated[int, Query(ge=1, le=100)] = 50,
@@ -205,12 +164,12 @@ def create_app(settings: Settings | None = None, *, worker: bool = False):
         return Response(status_code=204)
 
     @app.get("/api/v1/public/surveys/{token}", response_model=PublicSurvey, tags=["Public surveys"])
-    async def public_survey(token: str, repository: Repo):
+    async def public_survey(token: str, repository: PublicRepo):
         survey = await must_get_public(repository, token)
         return {field: survey[field] for field in ("title", "description", "respondent_mode", "questions")}
 
     @app.post("/api/v1/public/surveys/{token}/responses", response_model=Receipt, status_code=201, tags=["Public surveys"])
-    async def submit_response(token: str, data: Submission, repository: Repo):
+    async def submit_response(token: str, data: Submission, repository: PublicRepo):
         survey = await must_get_public(repository, token)
         definition = SurveyCreate(**{field: survey[field] for field in ("title", "description", "respondent_mode", "questions")})
         try:
@@ -324,9 +283,13 @@ def create_app(settings: Settings | None = None, *, worker: bool = False):
 
     @app.get("/{path:path}", include_in_schema=False)
     async def frontend(path: str, request: Request):
+        serve_ui = (str(getattr(request.scope["env"], "SERVE_UI", "true")).lower() == "true"
+                    if worker else configured.serve_ui)
+        if not serve_ui:
+            raise HTTPException(404, "The web interface is disabled. Use the API or /docs.")
         if not path or (path.startswith("s/") and len(path.split("/")) == 2):
             asset = "index.html"
-        elif path in {"index.html", "styles.css", "app.js", "api.js", "forms.js", "mark.svg"}:
+        elif path in {"index.html", "styles.css", "app.js", "api.js", "forms.js", "accounts.js", "mark.svg"}:
             asset = path
         else:
             raise HTTPException(404, "Not found.")

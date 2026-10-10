@@ -1,10 +1,13 @@
-import { api, setKey, escape as e, notify, copy, download } from './api.js';
+import { api, setKey, setSession, escape as e, notify, copy, download } from './api.js';
 import { types, templates, newQuestion, surveyForm, readAnswers } from './forms.js';
+import { loginScreen, customerPage, invitationBody } from './accounts.js';
 
 const root = document.querySelector('#app');
 const modal = document.querySelector('#modal');
 const state = { unlocked: false, surveys: [], total: 0, filter: '', search: '', offset: 0, listVersion: 0, survey: null, dirty: false, resultsTab: 'summary', responseOffset: 0, keys: [] };
 let routeVersion = 0;
+let editVersion = 0;
+let savingDraft = false;
 
 const iconPaths = {
   grid: '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
@@ -37,24 +40,26 @@ function shell(active = 'surveys') {
   root.innerHTML = `<div class="workspace">
     <aside class="sidebar"><a class="brand" href="#/surveys"><img src="/mark.svg" alt=""><span>Survey<br><strong>Machine</strong><span class="brand-dot">.</span></span></a>
       <div class="workspace-label">YOUR WORKSPACE</div>
-      <nav aria-label="Main navigation">${[['surveys', 'grid', 'Surveys'], ['templates', 'template', 'Templates'], ['integrations', 'code', 'Integrations']].map(([id, glyph, label]) => `<a href="#/${id}" class="nav-item${active === id ? ' active' : ''}"${active === id ? ' aria-current="page"' : ''}>${icon(glyph)}<span>${label}</span>${active === id ? '<span class="nav-dot"></span>' : ''}</a>`).join('')}</nav>
+      <nav aria-label="Main navigation">${[['surveys', 'grid', 'Surveys'], ['templates', 'template', 'Templates'], ['integrations', 'code', 'Integrations'], ...(state.session?.operator ? [['customers', 'grid', 'Customers']] : [])].map(([id, glyph, label]) => `<a href="#/${id}" class="nav-item${active === id ? ' active' : ''}"${active === id ? ' aria-current="page"' : ''}>${icon(glyph)}<span>${label}</span>${active === id ? '<span class="nav-dot"></span>' : ''}</a>`).join('')}</nav>
       <div class="sidebar-note"><span class="note-spark">✳</span><h3>A little curiosity<br>goes a long way.</h3><p>Turn the right questions<br>into your next good idea.</p></div>
-      <div class="sidebar-bottom"><a href="/docs" target="_blank" rel="noopener">${icon('code')} API documentation ${icon('arrow')}</a><div class="workspace-owner"><span class="avatar">SM</span><div><strong>My workspace</strong><span>Administrator</span></div><button class="icon-button" data-action="signout" aria-label="Lock workspace">${icon('exit')}</button></div></div>
+      <div class="sidebar-bottom"><a href="/docs" target="_blank" rel="noopener">${icon('code')} API documentation ${icon('arrow')}</a><div class="workspace-owner"><span class="avatar">SM</span><div><strong>${e(state.session?.workspace || 'My workspace')}</strong><span>${state.session?.operator ? 'Operator' : 'Workspace owner'}</span></div><button class="icon-button" data-action="signout" aria-label="Sign out">${icon('exit')}</button></div></div>
     </aside>
-    <div class="workspace-body"><header class="topbar"><span>Workspace <span class="crumb-divider">/</span> <strong>${active[0].toUpperCase() + active.slice(1)}</strong></span><div class="topbar-right"><span class="connection"><span></span> Workspace connected</span><span class="version-tag">v0.1</span></div></header><main id="main" class="main-content">${loading()}</main><footer class="workspace-footer"><span>Made for curious people.</span><span>Survey Machine <span class="footer-dot">·</span> Your questions, your data.</span></footer></div>
+    <div class="workspace-body"><header class="topbar"><span>Workspace <span class="crumb-divider">/</span> <strong>${active[0].toUpperCase() + active.slice(1)}</strong></span><div class="topbar-right"><span class="connection"><span></span> Workspace connected</span><span class="version-tag">v0.1</span><button class="icon-button mobile-signout" data-action="signout" aria-label="Sign out">${icon('exit')}</button></div></header><main id="main" class="main-content">${loading()}</main><footer class="workspace-footer"><span>Made for curious people.</span><span>Survey Machine <span class="footer-dot">·</span> Your questions, your data.</span></footer></div>
   </div>`;
 }
 
 function login() {
-  root.innerHTML = `<main id="main" class="login-page"><div class="login-art"><a class="brand" href="/"><img src="/mark.svg" alt=""><span>Survey<br><strong>Machine</strong><span class="brand-dot">.</span></span></a><div><span class="eyebrow">START WITH A LITTLE CURIOSITY</span><h1>Good questions.<br><em>Useful answers.</em></h1><p>A simple home for creating surveys,<br>hearing from people, and finding what’s next.</p><div class="login-art-lines" aria-hidden="true"><div>01 <span>Ask something.</span> ↗</div><div>02 <span>Hear people out.</span> ↗</div><div>03 <span>Make your next move.</span> ↗</div></div></div><span class="login-art-footer">Your questions. Your data. Your next good idea.</span></div><div class="login-side"><form id="login-form" class="login-form"><span class="eyebrow">YOUR WORKSPACE</span><h2>Let’s get you in.</h2><p>Enter your administrator key to open your workspace.</p><label for="workspace-key">Administrator key</label><input type="password" id="workspace-key" name="key" required autocomplete="off" placeholder="Your workspace key" minlength="32"><p class="form-error" id="login-error" role="alert"></p><button class="button primary" type="submit">Open workspace ${icon('arrow')}</button><div class="login-help">${icon('lock')}<span>Your key stays in memory for this session. Refreshing the page locks the workspace.</span></div><p class="setup-help">Setting up for the first time? Your administrator key is in your local configuration or your Cloudflare secret.</p></form></div></main>`;
+  root.innerHTML = loginScreen();
 }
 
 async function route() {
   const version = ++routeVersion;
+  const activation = location.hash.match(/^#\/activate\/([A-Za-z0-9_-]{43})$/);
+  if (activation) { state.activationToken = activation[1]; root.innerHTML = loginScreen({ activation: true }); return; }
   if (!state.unlocked) { login(); return; }
   const [, page = 'surveys', id] = location.hash.split('/');
   state.dirty = false;
-  shell(['templates', 'integrations'].includes(page) ? page : 'surveys');
+  shell(['templates', 'integrations', 'customers'].includes(page) ? page : 'surveys');
   const content = document.querySelector('#main');
   try {
     if (page === 'builder' && id) {
@@ -66,6 +71,12 @@ async function route() {
       state.responseOffset = 0;
       await loadResults(id, version);
     } else if (page === 'templates') { renderTemplates(); }
+    else if (page === 'customers') {
+      if (!state.session.operator) { location.hash = '#/surveys'; return; }
+      state.customers = await api('/operator/customers');
+      if (version !== routeVersion) return;
+      content.innerHTML = customerPage(state.customers);
+    }
     else if (page === 'integrations') {
       const keys = await api('/api-keys');
       if (version !== routeVersion) return;
@@ -146,18 +157,32 @@ function editorQuestion(q, i, locked) {
 }
 
 function markDirty() {
+  editVersion++;
   state.dirty = true;
   const saved = document.querySelector('#save-state');
   if (saved) saved.textContent = '● Unsaved changes';
 }
 
 async function saveDraft() {
+  if (savingDraft) return false;
   if (!document.querySelector('#builder-form').reportValidity()) return false;
   const s = state.survey;
-  state.survey = await api(`/surveys/${s.id}`, { method: 'PUT', body: { title: s.title, description: s.description, respondent_mode: s.respondent_mode, questions: s.questions, revision: s.revision } });
-  state.dirty = false;
-  renderBuilder();
-  return true;
+  const version = editVersion, route = routeVersion;
+  savingDraft = true;
+  try {
+    const saved = await api(`/surveys/${s.id}`, { method: 'PUT', body: { title: s.title, description: s.description, respondent_mode: s.respondent_mode, questions: s.questions, revision: s.revision } });
+    if (state.survey !== s || route !== routeVersion) return false;
+    if (version !== editVersion) {
+      // Keep edits made while the request was in flight, and save them next time.
+      s.revision = saved.revision; s.updated_at = saved.updated_at;
+      notify('Earlier changes saved. Save again to include your latest edits.');
+      return false;
+    }
+    state.survey = saved;
+    state.dirty = false;
+    renderBuilder();
+    return true;
+  } finally { savingDraft = false; }
 }
 
 function shareDialog(survey) {
@@ -202,7 +227,7 @@ function responseDetail(id) {
 
 function renderIntegrations() {
   document.querySelector('#main').innerHTML = `<div class="page-heading"><div><span class="eyebrow">MAKE SURVEYS PART OF YOUR PLATFORM</span><h1>Connect your world<span class="heading-dot">.</span></h1><p>The same survey engine. Wherever your application lives.</p></div><button class="button primary" data-action="new-key">${icon('plus')} Create API key</button></div>
-    <div class="integration-intro"><div><span class="eyebrow">ONE API. LOTS OF POSSIBILITIES.</span><h2>Small API.<br>Big conversations.</h2><p>Create surveys, render them in your own interface, and collect responses over standard HTTP and JSON.</p><div class="language-tags"><span>Python</span><span>Java</span><span>JavaScript</span><span>Any HTTP client</span></div><a class="text-link" href="/docs" target="_blank" rel="noopener">Explore the API documentation ↗</a></div><div class="code-card"><div><span>YOUR API ENDPOINT</span><button class="icon-button" data-action="copy-api" aria-label="Copy API base URL">${icon('copy')}</button></div><code>${e(location.origin)}/api/v1</code><pre><code>${e(`curl '${location.origin}/api/v1/surveys' \\n  -H 'X-API-Key: YOUR_API_KEY'`)}</code></pre><p>Keep administrative keys in your server. Public survey endpoints can be used in a browser without a key.</p></div></div>
+    <div class="integration-intro"><div><span class="eyebrow">ONE API. LOTS OF POSSIBILITIES.</span><h2>Small API.<br>Big conversations.</h2><p>Create surveys, render them in your own interface, and collect responses over standard HTTP and JSON.</p><div class="language-tags"><span>Python</span><span>Java</span><span>JavaScript</span><span>Any HTTP client</span></div><a class="text-link" href="/docs" target="_blank" rel="noopener">Explore the API documentation ↗</a></div><div class="code-card"><div><span>YOUR API ENDPOINT</span><button class="icon-button" data-action="copy-api" aria-label="Copy API base URL">${icon('copy')}</button></div><code>${e(location.origin)}/api/v1</code><pre><code>${e(`curl '${location.origin}/api/v1/surveys' \\\n  -H 'X-API-Key: YOUR_API_KEY'`)}</code></pre><p>Keep administrative keys in your server. Public survey endpoints can be used in a browser without a key.</p></div></div>
     <div class="section-heading"><h2>API keys</h2><span>${state.keys.length} active</span></div>
     ${state.keys.length ? `<div class="table-wrap keys-table-wrap"><table><thead><tr><th>Name</th><th>Key prefix</th><th>Permissions</th><th>Created</th><th></th></tr></thead><tbody>${state.keys.map(k => `<tr><td><strong>${e(k.name)}</strong></td><td><code>${e(k.prefix)}…</code></td><td><div class="scope-tags">${k.scopes.map(scope => `<span>${e(scope)}</span>`).join('')}</div></td><td>${date(k.created_at)}</td><td><button class="text-button danger-text" data-action="revoke-key" data-id="${k.id}">Revoke</button></td></tr>`).join('')}</tbody></table></div>` : '<div class="empty-keys"><span class="empty-symbol">⌘</span><div><h3>Give your first integration a key.</h3><p>Choose just the permissions it needs. You can revoke access any time.</p></div><button class="button secondary" data-action="new-key">Create API key ↗</button></div>'}
     <div class="integration-options"><section><h3>${icon('link')} Embed a survey</h3><p>Copy an iframe from any published survey’s Share dialog. Responses go straight to your workspace.</p></section><section><h3>${icon('code')} Build your own interface</h3><p>Read a public survey’s questions and submit answers through the public API. Review results using a scoped key on your server.</p></section></div>`;
@@ -281,17 +306,36 @@ document.addEventListener('change', event => {
 
 document.addEventListener('submit', async event => {
   const form = event.target;
-  if (!['login-form', 'create-survey-form', 'create-key-form', 'builder-form', 'search-form'].includes(form.id)) return;
+  if (!['login-form', 'operator-login-form', 'activate-form', 'create-customer-form', 'create-survey-form', 'create-key-form', 'builder-form', 'search-form'].includes(form.id)) return;
   event.preventDefault();
   const button = form.querySelector('button[type="submit"]') || document.querySelector('#save-button');
   if (button?.disabled) return;
   if (button) button.disabled = true;
   try {
-    if (form.id === 'login-form') {
+    if (form.id === 'operator-login-form') {
       setKey(new FormData(form).get('key'));
-      await api('/auth/check');
+      state.session = await api('/auth/check');
+      setSession(state.session);
       state.unlocked = true;
       await route();
+    } else if (form.id === 'login-form' || form.id === 'activate-form') {
+      const values = new FormData(form);
+      const body = { email: values.get('email'), password: values.get('password') };
+      const activation = form.id === 'activate-form';
+      if (activation && body.password !== values.get('confirmation')) {
+        document.querySelector('#login-error').textContent = 'The passwords do not match.'; return;
+      }
+      if (activation) body.token = state.activationToken;
+      setKey('');
+      state.session = await api(activation ? '/auth/activate' : '/auth/login', { method: 'POST', body });
+      setSession(state.session); state.unlocked = true;
+      if (activation) { history.replaceState(null, '', '/#/surveys'); state.activationToken = null; }
+      await route();
+    } else if (form.id === 'create-customer-form') {
+      const values = new FormData(form);
+      const customer = await api('/operator/customers', { method: 'POST', body: { name: values.get('name'), email: values.get('email') } });
+      await route();
+      showModal(`${modalHeader('Your invitation is ready', customer.name)}${invitationBody(customer)}`);
     } else if (form.id === 'create-survey-form') {
       const values = new FormData(form);
       const template = templates[state.pendingTemplate];
@@ -311,7 +355,7 @@ document.addEventListener('submit', async event => {
       state.search = String(new FormData(form).get('search')).trim(); state.offset = 0; await refreshSurveys();
     }
   } catch (error) {
-    if (form.id === 'login-form') { setKey(''); document.querySelector('#login-error').textContent = error.message; }
+    if (['login-form', 'operator-login-form', 'activate-form'].includes(form.id)) { setKey(''); document.querySelector('#login-error').textContent = error.message; }
     else notify(error.message, true);
   } finally { if (button?.isConnected) button.disabled = false; }
 });
@@ -327,13 +371,44 @@ document.addEventListener('click', async event => {
   const action = button.dataset.action;
   const qIndex = state.survey?.questions.findIndex(q => q.id === button.dataset.q);
   const q = qIndex >= 0 ? state.survey.questions[qIndex] : null;
-  const asyncActions = ['publish', 'close-survey', 'reopen', 'duplicate', 'duplicate-row', 'delete-survey', 'delete-response', 'export-csv', 'export-json', 'revoke-key', 'refresh-results', 'response-next', 'response-prev', 'survey-next', 'survey-prev', 'filter'];
+  const asyncActions = ['signout', 'reset-customer', 'toggle-customer', 'customer-next', 'customer-prev', 'publish', 'close-survey', 'reopen', 'duplicate', 'duplicate-row', 'delete-survey', 'delete-response', 'export-csv', 'export-json', 'revoke-key', 'refresh-results', 'response-next', 'response-prev', 'survey-next', 'survey-prev', 'filter'];
   if (asyncActions.includes(action)) button.disabled = true;
   try {
     switch (action) {
       case 'close-modal': closeModal(); break;
       case 'retry': await route(); break;
-      case 'signout': if (safeLeave()) { setKey(''); state.unlocked = false; state.dirty = false; closeModal(); await route(); } break;
+      case 'signout':
+        if (safeLeave()) {
+          try { await api('/auth/logout', { method: 'POST' }); }
+          catch (error) { if (error.status !== 401) throw error; }
+          setKey(''); setSession(null); state.session = null; state.unlocked = false; state.dirty = false;
+          state.survey = null; state.surveys = []; state.keys = []; closeModal(); await route();
+        } break;
+      case 'operator-login': root.innerHTML = loginScreen({ operator: true }); break;
+      case 'customer-login': history.replaceState(null, '', '/'); state.activationToken = null; login(); break;
+      case 'new-customer':
+        showModal(`${modalHeader('Invite a customer', 'Their surveys and responses will be private to their workspace.')}<form id="create-customer-form"><label for="customer-name">Workspace name</label><input id="customer-name" name="name" required maxlength="100" placeholder="e.g. Riverside Studio"><label for="customer-email">Owner email</label><input id="customer-email" name="email" type="email" autocomplete="off" required maxlength="254"><div class="modal-actions"><button class="button secondary" type="button" data-action="close-modal">Cancel</button><button class="button primary" type="submit">Create invitation ↗</button></div></form>`); break;
+      case 'copy-invitation': await copy(document.querySelector('#invitation-link').value, document.querySelector('#invitation-link')); break;
+      case 'reset-customer': {
+        const customer = state.customers.items.find(c => c.id === button.dataset.id);
+        if (!confirm(`Create a new invitation or recovery link for ${customer.email}? Any previous unused link will expire.`)) break;
+        const result = await api(`/operator/customers/${customer.id}/reset`, { method: 'POST' });
+        showModal(`${modalHeader('Account recovery link', result.name)}${invitationBody(result)}`); break;
+      }
+      case 'toggle-customer': {
+        const customer = state.customers.items.find(c => c.id === button.dataset.id);
+        if (!confirm(`${customer.enabled ? 'Disable' : 'Enable'} access for ${customer.name}? Disabling pauses their surveys and integration keys and signs out their sessions.`)) break;
+        await api(`/operator/customers/${customer.id}`, { method: 'PUT', body: { enabled: !customer.enabled } });
+        await route(); break;
+      }
+      case 'customer-next':
+      case 'customer-prev': {
+        const version = routeVersion;
+        const offset = Math.max(0, state.customers.offset + (action === 'customer-next' ? 50 : -50));
+        const customers = await api(`/operator/customers?offset=${offset}`);
+        if (version === routeVersion) { state.customers = customers; document.querySelector('#main').innerHTML = customerPage(customers); }
+        break;
+      }
       case 'new-survey': newSurveyDialog(); break;
       case 'template': newSurveyDialog(button.dataset.template); break;
       case 'filter': state.filter = button.dataset.filter; state.offset = 0; await refreshSurveys(); break;
@@ -404,4 +479,9 @@ window.addEventListener('hashchange', () => {
 });
 const publicMatch = location.pathname.match(/^\/s\/([A-Za-z0-9_-]{32})$/);
 if (publicMatch) openPublic(publicMatch[1]);
-else route();
+else if (location.hash.startsWith('#/activate/')) route();
+else {
+  api('/auth/check').then(session => {
+    state.session = session; setSession(session); state.unlocked = true; return route();
+  }).catch(error => { login(); if (error.status !== 401) document.querySelector('#login-error').textContent = error.message; });
+}
