@@ -45,11 +45,13 @@ SM_TEST_D1=1 npm run test:browser
 npm run build:cloudflare
 ```
 
-The final command is a **dry-run**. Setup, tests, builds and CI do not publish the application or create Cloudflare resources. Browser tests create disposable local databases. A Docker alternative for browser testing is documented for Linux systems without Chromium's libraries.
+The final command is a **dry-run**. Setup, tests, local build commands and GitHub Actions checks do not publish the application or create Cloudflare resources. Browser tests create disposable local databases. A Docker alternative for browser testing is documented for Linux systems without Chromium's libraries.
 
 For a conventional PostgreSQL deployment, `docker compose up --build -d --wait` starts the app at **http://127.0.0.1:8080** with persistent database storage.
 
-- [Setup, testing, backups and future deployment](docs/deployment.md)
+For Cloudflare, keep the database ID placeholder in `wrangler.jsonc`. Supply the production ID through the `D1_DATABASE_ID` build variable and use `npm run deploy:cloudflare` when ready to migrate and publish. The [UI deployment guide](docs/deployment.md#cloudflare-and-github-ui-setup) covers the Cloudflare and GitHub settings.
+
+- [Setup, testing, backups and deployment](docs/deployment.md)
 - [API and client-language examples](docs/api.md)
 - [Self-host the API or mount it inside your own application](docs/self-hosting.md)
 - [Architecture and release boundaries](docs/architecture.md)

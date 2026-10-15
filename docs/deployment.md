@@ -113,25 +113,88 @@ direct access to the app port. The provided Compose defaults bind to localhost.
 
 ## When you choose to deploy to Cloudflare
 
-These are future manual steps, not performed by setup, tests, or CI.
+Keep `REPLACE_WITH_YOUR_D1_DATABASE_ID` in the committed `wrangler.jsonc`. Production
+uses the `D1_DATABASE_ID` environment variable supplied by Cloudflare's build settings.
+`npm run deploy:cloudflare` validates it, stages the Python application, checks the
+bundle, applies remote migrations, and deploys. A failed build or migration stops
+deployment. Both migration and deployment use the same temporary configuration.
+That file is ignored by Git and Docker and removed when the command exits, including
+on failure. The tracked configuration is never rewritten.
 
-1. Log in using npx wrangler login.
-2. Create the one shared database using npx wrangler d1 create survey-machine.
-3. Put its returned database_id in wrangler.jsonc. Keep the binding named DB.
-4. Keep SECURE_COOKIES=true in wrangler.jsonc. Set CORS_ORIGINS only if a separate
-   browser application needs direct API access, using comma-separated exact origins.
-   Server-to-server calls and iframe embeds do not require CORS configuration.
-5. Run the local verification commands above.
-6. Back up existing remote data before migrations, then run
-   npx wrangler d1 migrations apply DB --remote.
-7. Set a fresh production operator key with npx wrangler secret put ADMIN_API_KEY.
-   Enter it at the prompt; do not put it in wrangler.jsonc or source control.
-8. Deploy with uv run --group workers pywrangler deploy.
-9. Check /health, operator sign-in, a customer invitation, submission and export
-   over the real HTTPS URL before inviting customers.
+These are manual setup steps. The GitHub Actions checks remain local; connecting
+**Cloudflare Workers Builds** enables actual deployments on future pushes to `main`.
 
-The first secret-put can offer to create the Worker if it does not yet exist.
-These steps create resources or publish code and should be run only when you are ready.
+### Cloudflare and GitHub UI setup
+
+1. In GitHub, make sure `main` includes `scripts/deploy_cloudflare.py` and the
+   `deploy:cloudflare` script in `package.json`. Do not paste the production ID into
+   GitHub's file editor, a commit message, or an issue.
+2. In Cloudflare, open **Storage & databases → D1**, create `survey-machine` if it
+   does not already exist, and copy its database ID. Use one shared database for
+   this deployment. Leave the binding name `DB` in the repository configuration.
+3. Under **Workers & Pages → Create application**, start with the Hello World
+   Worker named `survey-machine`. This creates a placeholder so settings can be
+   configured before publishing the application. If that Worker exists, open it.
+4. Under the Worker's **Settings → Variables and Secrets**, add `ADMIN_API_KEY`
+   as a runtime **Secret**, using a fresh production operator key. Keep it in your
+   password manager; never copy it into GitHub or the build command.
+5. Connect the GitHub repository under **Settings → Builds**. Select `main` and
+   use the following settings. Before the application build runs, make sure its
+   deployment API token has **Account → D1 → Edit** for the target account, in
+   addition to its Workers deployment permissions. Cloudflare's automatically
+   generated build token does not include D1 permissions by default; they can be
+   edited under **My Profile → API Tokens**, or supplied using a custom token.
+
+| Build setting | Value |
+| --- | --- |
+| Worker name | `survey-machine` |
+| Root directory | Repository root |
+| Build command | `python -m pip install uv==0.12.5 && npm ci && uv sync --frozen --group workers` |
+| Deploy command | `npm run deploy:cloudflare` |
+| Preview builds | Disabled for this initial production setup |
+
+Add these under **Build variables and secrets**, separate from runtime variables:
+
+| Name | Value |
+| --- | --- |
+| `D1_DATABASE_ID` | The database ID copied from D1; store it here only |
+| `SKIP_DEPENDENCY_INSTALL` | `true` (the build command installs pinned dependencies) |
+| `NODE_VERSION` | `22` |
+
+6. Save the settings and start the build (or retry if an initial build started
+   before configuration was complete). On later releases, back up existing data
+   before applying new migrations. The deploy command handles Wrangler migration
+   tracking; do not paste the SQL files into the D1 console manually.
+7. After a successful deployment, visit the Worker's HTTPS URL and `/health`.
+   Test operator sign-in, a customer invitation, survey publication, submission
+   and export before inviting customers.
+
+Build variables are only available during the build. The generated config attaches
+D1 to the Worker as `DB`; the application does not need `D1_DATABASE_ID` as a runtime
+variable. Keep `SECURE_COOKIES=true`. Set `CORS_ORIGINS` in `wrangler.jsonc` only for
+separate browser applications that need direct API access, using exact origins.
+
+The deploy helper explicitly stages Python modules because Workers Builds does not
+honor Wrangler's custom build settings. It uses `pywrangler` to package Python
+dependencies. Do not replace the deploy command with plain `npx wrangler deploy`.
+
+### Optional terminal deployment
+
+After installing dependencies, authenticate with `npx wrangler login`, create the
+database if needed with `npx wrangler d1 create survey-machine`, and set the runtime
+operator key through the dashboard or `npx wrangler secret put ADMIN_API_KEY`.
+Supply the database ID without putting it in a command saved in shell history:
+
+~~~sh
+read -r -p "D1 database ID: " D1_DATABASE_ID
+export D1_DATABASE_ID
+npm run deploy:cloudflare -- --dry-run
+~~~
+
+The dry-run bundles locally and does not run remote migrations or publish anything.
+When ready, run `npm run deploy:cloudflare` to migrate and publish, then
+`unset D1_DATABASE_ID`. Ordinary local development and `npm run build:cloudflare`
+continue to work with the placeholder and need no production ID.
 
 Local checks do not establish Cloudflare account permissions, plan limits, production
 CPU/startup budgets, custom-domain configuration or live routing. Evaluate those on
@@ -158,5 +221,7 @@ need runtime headroom; choose an appropriate Workers plan and load-test expected
 
 References: [Python Workers](https://developers.cloudflare.com/workers/languages/python/),
 [FastAPI on Workers](https://developers.cloudflare.com/workers/languages/python/packages/fastapi/),
+[Workers Builds settings](https://developers.cloudflare.com/workers/ci-cd/builds/configuration/),
+[Workers build image](https://developers.cloudflare.com/workers/ci-cd/builds/build-image/),
 [D1 migrations](https://developers.cloudflare.com/d1/reference/migrations/),
 [D1 backups](https://developers.cloudflare.com/d1/reference/time-travel/).

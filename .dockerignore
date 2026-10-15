@@ -2,6 +2,7 @@
 .venv*
 .worker
 .wrangler
+wrangler.deploy-*.jsonc
 .tools
 python_modules
 node_modules

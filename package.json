@@ -12,7 +12,8 @@
     "check": "node --check survey_machine/web/app.js && node --check survey_machine/web/api.js && node --check survey_machine/web/forms.js && node --check survey_machine/web/accounts.js",
     "test": "uv run --extra local --extra dev pytest -q",
     "test:browser": "playwright test",
-    "build:cloudflare": "uv run --group workers pywrangler deploy --dry-run --outdir dist/cloudflare"
+    "build:cloudflare": "uv run --group workers pywrangler deploy --dry-run --outdir dist/cloudflare",
+    "deploy:cloudflare": "uv run --frozen --group workers python scripts/deploy_cloudflare.py"
   },
   "devDependencies": {
     "@playwright/test": "1.64.0",

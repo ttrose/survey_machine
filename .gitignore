@@ -10,6 +10,7 @@ build/
 dist/
 node_modules/
 .wrangler/
+wrangler.deploy-*.jsonc
 .worker/
 .env
 .dev.vars
