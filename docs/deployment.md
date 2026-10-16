@@ -141,9 +141,8 @@ These are manual setup steps. The GitHub Actions checks remain local; connecting
 5. Connect the GitHub repository under **Settings → Builds**. Select `main` and
    use the following settings. Before the application build runs, make sure its
    deployment API token has **Account → D1 → Edit** for the target account, in
-   addition to its Workers deployment permissions. Cloudflare's automatically
-   generated build token does not include D1 permissions by default; they can be
-   edited under **My Profile → API Tokens**, or supplied using a custom token.
+   addition to its Workers deployment permissions. Cloudflare may already include D1 permissions.
+   Verify that the build token has Account → D1 → Edit for the target account..
 
 | Build setting | Value |
 | --- | --- |
