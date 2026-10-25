@@ -23,7 +23,7 @@ npm run setup
 npm run dev
 ```
 
-Open **http://127.0.0.1:8000**. Choose **Operator sign-in**, read `ADMIN_API_KEY` from the ignored `.env` file, then open **Customers → Invite customer**. Share the generated link privately. The customer chooses a password and can immediately start building surveys. Invitations and recovery links are delivered manually in this release.
+Open **http://127.0.0.1:8000**. Choose **Operator sign-in**, read `ADMIN_API_KEY` from the ignored `.env` file, then open **Customers → Invite customer**. Share the generated link privately. The customer chooses a password and can immediately start building surveys. Invitations and recovery links can be sent automatically through Cloudflare Email Sending when configured; otherwise, share the generated link manually.
 
 For Cloudflare's local runtime instead:
 
@@ -58,7 +58,7 @@ For Cloudflare, keep the database ID placeholder in `wrangler.jsonc`. Supply the
 - [Recorded local verification](docs/verification.md)
 - [Security and privacy](SECURITY.md)
 
-The current release has one owner per customer workspace. Team memberships, automated email, billing, MFA, uploads and conditional survey branching are future features. Public share links permit multiple responses; anonymous mode does not guarantee that free-text answers contain no personal information.
+The current release has one owner per customer workspace. Team memberships, bulk survey email, billing, MFA, uploads and conditional survey branching are future features. Public share links permit multiple responses; anonymous mode does not guarantee that free-text answers contain no personal information.
 
 License and usage
 This project is proprietary and is not licensed for public use.
