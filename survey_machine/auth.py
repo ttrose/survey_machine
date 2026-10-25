@@ -13,6 +13,7 @@ from pydantic import ConfigDict, Field, StrictBool, field_validator
 
 from . import __version__
 from .config import Settings
+from .email import deliver_account_email
 from .database import D1Database
 from .models import ALL_SCOPES, Model
 from .repository import Repository, now
@@ -269,26 +270,30 @@ async def customers(database: DB, limit: Annotated[int, Query(ge=1, le=100)] = 5
 
 
 @router.post("/operator/customers", status_code=201, dependencies=[Depends(require_operator)])
-async def create_customer(data: CustomerCreate, database: DB):
+async def create_customer(data: CustomerCreate, database: DB, request: Request):
     token, workspace_id, current = secrets.token_urlsafe(32), str(uuid4()), int(time.time())
     changed = await database.execute(
         "INSERT INTO workspaces(id, name, email, onboarding_digest, onboarding_expires, created_at) VALUES (?, ?, ?, ?, ?, ?) "
         "ON CONFLICT(email) DO NOTHING", (workspace_id, data.name, data.email, digest(token), current + INVITE_SECONDS, now()))
     if not changed:
         raise HTTPException(409, "An account with that email already exists.")
-    return {"id": workspace_id, "name": data.name, "email": data.email, "activation_path": f"/#/activate/{token}",
-            "expires_in": INVITE_SECONDS}
+    activation_path = f"/#/activate/{token}"
+    sent = await deliver_account_email(request, recipient=data.email, name=data.name, activation_path=activation_path, reset=False)
+    return {"id": workspace_id, "name": data.name, "email": data.email, "activation_path": activation_path,
+            "expires_in": INVITE_SECONDS, "email_sent": sent}
 
 
 @router.post("/operator/customers/{workspace_id}/reset", dependencies=[Depends(require_operator)])
-async def reset_customer(workspace_id: UUID, database: DB):
+async def reset_customer(workspace_id: UUID, database: DB, request: Request):
     token = secrets.token_urlsafe(32)
     row = await database.fetch_one(
         "UPDATE workspaces SET onboarding_digest = ?, onboarding_expires = ? WHERE id = ? "
         "RETURNING id, name, email", (digest(token), int(time.time()) + INVITE_SECONDS, str(workspace_id)))
     if row is None:
         raise HTTPException(404, "Customer not found.")
-    return {**row, "activation_path": f"/#/activate/{token}", "expires_in": INVITE_SECONDS}
+    activation_path = f"/#/activate/{token}"
+    sent = await deliver_account_email(request, recipient=row["email"], name=row["name"], activation_path=activation_path, reset=True)
+    return {**row, "activation_path": activation_path, "expires_in": INVITE_SECONDS, "email_sent": sent}
 
 
 @router.put("/operator/customers/{workspace_id}", dependencies=[Depends(require_operator)])
