@@ -200,6 +200,27 @@ CPU/startup budgets, custom-domain configuration or live routing. Evaluate those
 the chosen account before launch. Authentication hashing and large summaries/exports
 need runtime headroom; choose an appropriate Workers plan and load-test expected usage.
 
+## Cloudflare transactional email
+
+Account invitations and password recovery can use Cloudflare Email Sending. Before enabling
+it, onboard the sending domain under Cloudflare **Compute > Email Service > Email Sending**,
+verify SPF/DKIM/DMARC and confirm the address may send. This is distinct from inbound Email Routing.
+
+The Worker configuration declares an `EMAIL` send binding. Set these **runtime** variables
+in Cloudflare Workers settings (not only build variables):
+
+- `EMAIL_FROM`: an address belonging to your verified sending domain, such as `notifications@survey-machine.com`
+- `PUBLIC_APP_URL`: the canonical HTTPS origin, such as `https://app.survey-machine.com`
+
+Do not include a path or fragment in `PUBLIC_APP_URL`. Local conventional hosting and
+unconfigured Workers keep manual invitation and recovery links. The operator interface
+always provides the one-time link as a fallback and reports whether the sending
+request succeeded. A successful API response is not proof of inbox delivery.
+
+This is transactional email only; it does not implement bulk survey distribution.
+Before enabling it for real customers, verify a sent invitation and a password-reset
+message in your deployed Python Worker. Never paste one-time links into logs.
+
 ## Operations and recovery
 
 - Rotate the operator key using Cloudflare secrets (or the server environment), then

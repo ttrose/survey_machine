@@ -20,6 +20,7 @@ def invite(service, name="Customer"):
     email = f"{uuid4().hex}@example.com"
     response = service.post("/api/v1/operator/customers", headers=OPERATOR, json={"name": name, "email": email})
     assert response.status_code == 201, response.text
+    assert response.json()["email_sent"] is False
     return response.json()
 
 

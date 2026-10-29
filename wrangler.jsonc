@@ -21,6 +21,7 @@
       "migrations_dir": "survey_machine/migrations"
     }
   ],
-  "vars": {"CORS_ORIGINS": "", "SECURE_COOKIES": "true", "SERVE_UI": "true"},
+  "send_email": [{"name": "EMAIL", "remote": true}],
+  "vars": {"CORS_ORIGINS": "", "SECURE_COOKIES": "true", "SERVE_UI": "true", "EMAIL_FROM": "", "PUBLIC_APP_URL": ""},
   "observability": {"enabled": false}
 }
